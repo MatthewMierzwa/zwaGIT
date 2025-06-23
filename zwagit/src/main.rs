@@ -18,7 +18,6 @@ struct Cli {
 enum Commands {
     /// Init a new zwagit repo
     Init,
-
     HashObject {
         /// Path to the file to hash
         path: String,
@@ -26,7 +25,15 @@ enum Commands {
         /// Write the object to the object store
         #[arg(short = 'w', long = "write")]
         write: bool,
-    }
+    },
+    CatFile {
+        /// Print the contents of the object
+        #[arg(short = 'p', long = "pretty")]
+        pretty: bool,
+
+        /// The SHA-1 hash of the object
+        hash: String,
+    },
 }
 
 fn main() {
@@ -35,6 +42,7 @@ fn main() {
     match cli.command {
         Commands::Init => init_repo(),
         Commands::HashObject { path, write } => hash_object(&path, write),
+        Commands::CatFile { pretty, hash } => cat_file(&hash, pretty),
     }
 }
 
@@ -82,4 +90,42 @@ fn hash_object(path: &str, write: bool) {
         f.write_all(&store).expect("Failed to write object file");
     }
 
+}
+
+fn cat_file(hash: &str, pretty: bool) {
+    if hash.len() != 40 {
+        eprintln!("Invalid hash length; must be 40 hex characters.");
+        return;
+    }
+
+    let (dir, file) = hash.split_at(2);
+    let object_path = format!(".zwagit/objects/{}/{}", dir, file);
+
+    let data = match fs::read(&object_path) {
+        Ok(d) => d,
+        Err(_) => {
+            eprintln!("Object not found: {}", hash);
+            return;
+        }
+    };
+
+    if pretty {
+        // Format: "blob <len>\0<content>"
+        // Find the first null byte, then print everything after it
+        if let Some(null_pos) = data.iter().position(|&b| b == 0) {
+            let content = &data[null_pos + 1..];
+            match std::str::from_utf8(content) {
+                Ok(text) => println!("{}", text),
+                Err(_) => eprintln!("Failed to parse object content as UTF-8.");
+            }
+        } else {
+            eprintln!("Malformed object: no null byte found.");
+        }
+    } else {
+        // Print raw data (might include header + content)
+        match std::str::from_utf8(&data) {
+            Ok(text) => println!("{}", text),
+            Err(_) => eprintln!("Failed to parse object as UTF-8."),
+        }
+    }
 }
